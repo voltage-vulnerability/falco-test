@@ -1,0 +1,17 @@
+# .falco/custom_rules.yaml
+- rule: Unauthorized Sensitive File Read
+  desc: Detects reading credentials, system passwords, or SSH keys.
+  condition: >
+    (evt.type=open or evt.type=openat or evt.type=openat2) 
+    and container 
+    and (fd.name in (/etc/passwd, /etc/shadow, /etc/sudoers))
+  output: "CRITICAL ALERT: Sensitive file read! (user=%user.name file=%fd.name process=%proc.name container=%container.name)"
+  priority: CRITICAL
+  tags: [filesystem]
+
+- rule: Package Management Executed in Container
+  desc: Detects when package management tools are executed.
+  condition: spawned_process and container and proc.name in (apt, apt-get, apk, yum)
+  output: "WARNING ALERT: Software installation attempt! (user=%user.name process=%proc.name command=%proc.cmdline container=%container.name)"
+  priority: WARNING
+  tags: [process]
