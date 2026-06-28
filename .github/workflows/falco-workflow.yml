@@ -11,24 +11,29 @@ jobs:
       - name: Checkout rules file
         uses: actions/checkout@v4
 
+      # Quick Debug Step: This lets us see exactly where your Git file landed
+      - name: Verify Git Rule File Path
+        run: |
+          echo "Current Path: $(pwd)"
+          echo "Listing .falco directory structure:"
+          ls -R .falco || echo "ERROR: .falco directory not found!"
+
       - name: Start falco security agent
         run: |
           sudo docker run -d --name falco \
             --privileged \
             --pid=host \
-            -v ${{ github.workspace }}/.falco/custom_rules.yaml:/etc/falco/rules.d/custom_rules.yaml:ro \
+            -v $(pwd)/.falco/custom_rules.yaml:/etc/falco/rules.d/custom_rules.yaml:ro \
             -v /sys/kernel/tracing:/sys/kernel/tracing:ro \
             -v /var/run/docker.sock:/host/var/run/docker.sock \
             -v /proc:/host/proc:ro \
             -v /etc:/host/etc:ro \
             falcosecurity/falco:latest
           
-          # Give the eBPF probe full initialization runway
           sleep 10
 
       - name: Start the falco log for monitoring
         run: |
-          # Use stdbuf or basic redirect to force unbuffered background streams
           sudo docker logs -f falco > falco_output.log &
           echo "Falco logging background process started."
           sleep 2
@@ -41,23 +46,19 @@ jobs:
           echo "=== Attack 2: Attempting to run apt update ==="
           sudo docker run --rm ubuntu:latest apt-get update || true
           
-          # CRITICAL: Allow background logs to catch up and flush to disk
           sleep 5
 
       - name: Analyze Falco Security Alerts
         run: |
           echo "=== Displaying Captured Falco Alerts ==="
           
-          # Fallback check: If file is missing or empty, dump raw docker logs directly
-          if [ ! -s falco_output.log ]; then
-            echo "[INFO] falco_output.log was empty, pulling straight from Docker container daemon instead:"
-            sudo docker logs falco
-          else
-            cat falco_output.log
-          fi
+          # Print raw container logs straight from the engine daemon
+          sudo docker logs falco
           
-          # We check the container logs directly to make sure we don't miss buffered alerts
           if sudo docker logs falco | grep -qi "ALERT"; then
-            echo "Security violations detected by Falco!"
+            echo "Security violations successfully detected by Falco!"
+            exit 0
+          else
+            echo "ERROR: Falco running, but rules were not triggered."
             exit 1
           fi
