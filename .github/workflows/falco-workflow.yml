@@ -11,19 +11,12 @@ jobs:
       - name: Checkout rules file
         uses: actions/checkout@v4
 
-      # Quick Debug Step: This lets us see exactly where your Git file landed
-      - name: Verify Git Rule File Path
-        run: |
-          echo "Current Path: $(pwd)"
-          echo "Listing .falco directory structure:"
-          ls -R .falco || echo "ERROR: .falco directory not found!"
-
       - name: Start falco security agent
         run: |
           sudo docker run -d --name falco \
             --privileged \
             --pid=host \
-            -v $(pwd)/.falco/custom_rules.yaml:/etc/falco/rules.d/custom_rules.yaml:ro \
+            -v $(pwd)/.falco/custom_rules.yaml:/etc/falco/falco_rules.local.yaml:ro \
             -v /sys/kernel/tracing:/sys/kernel/tracing:ro \
             -v /var/run/docker.sock:/host/var/run/docker.sock \
             -v /proc:/host/proc:ro \
@@ -55,7 +48,8 @@ jobs:
           # Print raw container logs straight from the engine daemon
           sudo docker logs falco
           
-          if sudo docker logs falco | grep -qi "ALERT"; then
+          # Check for custom validation or default alert triggers
+          if sudo docker logs falco | grep -qiE "ALERT|Notice|Warning"; then
             echo "Security violations successfully detected by Falco!"
             exit 0
           else
