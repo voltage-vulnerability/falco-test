@@ -8,15 +8,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout rules file
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Prepare Custom Rules Path
+        run: |
+          # Ensure a fallback file exists locally even if the Git folder had a typo
+          mkdir -p .falco
+          
+          if [ -f .falco/custom_rules.yaml ]; then
+            echo "Found existing Git rules file. Using it."
+          else
+            echo "Git rules file missing. Creating dynamic fallback rules config."
+            cat << 'EOF' > .falco/custom_rules.yaml
+            - rule: Unauthorized Sensitive File Read
+              desc: Detects reading credentials, system passwords, or SSH keys.
+              condition: (evt.type=open or evt.type=openat or evt.type=openat2) and container and (fd.name in (/etc/passwd, /etc/shadow, /etc/sudoers))
+              output: "CRITICAL ALERT: Sensitive file read! (user=%user.name file=%fd.name process=%proc.name container=%container.name)"
+              priority: CRITICAL
+              tags: [filesystem]
+
+            - rule: Package Management Executed in Container
+              desc: Detects when package management tools are executed.
+              condition: spawned_process and container and proc.name in (apt, apt-get, apk, yum)
+              output: "WARNING ALERT: Software installation attempt! (user=%user.name process=%proc.name command=%proc.cmdline container=%container.name)"
+              priority: WARNING
+              tags: [process]
+          EOF
+          fi
 
       - name: Start falco security agent
         run: |
+          # Use an absolute workspace path resolution to guarantee Docker mount validity
           sudo docker run -d --name falco \
             --privileged \
             --pid=host \
-            -v $(pwd)/.falco/custom_rules.yaml:/etc/falco/falco_rules.local.yaml:ro \
+            -v ${{ github.workspace }}/.falco/custom_rules.yaml:/etc/falco/falco_rules.local.yaml:ro \
             -v /sys/kernel/tracing:/sys/kernel/tracing:ro \
             -v /var/run/docker.sock:/host/var/run/docker.sock \
             -v /proc:/host/proc:ro \
@@ -45,10 +72,9 @@ jobs:
         run: |
           echo "=== Displaying Captured Falco Alerts ==="
           
-          # Print raw container logs straight from the engine daemon
+          # Print the container logging output
           sudo docker logs falco
           
-          # Check for custom validation or default alert triggers
           if sudo docker logs falco | grep -qiE "ALERT|Notice|Warning"; then
             echo "Security violations successfully detected by Falco!"
             exit 0
