@@ -1,0 +1,49 @@
+name: Falco security monitoring
+
+on:
+  workflow_dispatch: 
+
+jobs:
+  falco-security-monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout rules file
+        uses: actions/checkout@v4
+
+      - name: Start falco security agent
+        run: |
+          sudo docker run -d --name falco \
+            --privileged \
+            --pid=host \
+            -v ${{ github.workspace }}/.falco/custom_rules.yaml:/etc/falco/rules.d/custom_rules.yaml:ro \
+            -v /sys/kernel/tracing:/sys/kernel/tracing:ro \
+            -v /var/run/docker.sock:/host/var/run/docker.sock \
+            -v /proc:/host/proc:ro \
+            -v /etc:/host/etc:ro \
+            falcosecurity/falco:latest
+          
+          sleep 5
+
+      - name: Start the falco log for monitoring
+        run: |
+          sudo docker logs -f falco > falco_output.log &
+          echo "Falco logging background process started."
+         
+      - name: Run Test Image and Trigger Violations
+        run: |
+          echo "=== Attack 1: Attempting to read /etc/passwd ==="
+          sudo docker run --rm ubuntu:latest cat /etc/passwd || true
+          
+          echo "=== Attack 2: Attempting to run apt update ==="
+          sudo docker run --rm ubuntu:latest apt-get update || true
+
+      - name: Analyze Falco Security Alerts
+        run: |
+          echo "=== Displaying Captured Falco Alerts ==="
+          cat falco_output.log
+          
+          if grep -q "ALERT" falco_output.log; then
+            echo "Security violations detected by Falco!"
+            exit 1
+          fi
